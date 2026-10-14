@@ -10,7 +10,7 @@ function Dashboard({ user }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [pairedFriend, setPairedFriend] = useState(null);
-  const [pairing, setPairing] = useState(false);
+  const [pairingFriendId, setPairingFriendId] = useState(null);
 
   const token = localStorage.getItem("token");
 
@@ -104,7 +104,8 @@ function Dashboard({ user }) {
       return;
     }
 
-    setPairing(true);
+    const selectedFriendId = String(friend?._id || friend?.id || "");
+    setPairingFriendId(selectedFriendId);
 
     // This permission request belongs to the current user only.
     // A browser cannot request location permission on another person's device.
@@ -122,6 +123,7 @@ function Dashboard({ user }) {
             },
             body: JSON.stringify({
               enabled: true,
+              friendId: selectedFriendId,
               latitude,
               longitude,
             }),
@@ -140,11 +142,11 @@ function Dashboard({ user }) {
         } catch (error) {
           setNotice(error.message || "Could not start the pairing session.");
         } finally {
-          setPairing(false);
+          setPairingFriendId(null);
         }
       },
       (error) => {
-        setPairing(false);
+        setPairingFriendId(null);
 
         const message =
           error.code === error.PERMISSION_DENIED
@@ -288,9 +290,9 @@ function Dashboard({ user }) {
                         type="button"
                         className="ss-pair-button"
                         onClick={() => pairWithFriend(friend)}
-                        disabled={pairing}
+                        disabled={pairingFriendId !== null}
                       >
-                        {pairing ? "Pairing…" : "Pair"}
+                        {pairingFriendId === String(friend._id || friend.id) ? "Pairing…" : "Pair"}
                       </button>
                     </div>
                   ))}

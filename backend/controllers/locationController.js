@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const UserLocation = require("../models/UserLocation");
 const Friendship = require("../models/Friendship");
 
@@ -50,24 +51,57 @@ exports.setDistanceThreshold = async (req, res) => {
 
 exports.setSharing = async (req, res) => {
   try {
-    const { enabled, latitude, longitude } = req.body;
+    const { enabled, latitude, longitude, friendId } = req.body;
     if (typeof enabled !== "boolean") {
       return res.status(400).json({ message: "enabled must be true or false." });
     }
     if (enabled && !validCoordinates(latitude, longitude)) {
       return res.status(400).json({ message: "A valid location is required to start sharing." });
     }
-    const update = enabled
-      ? { sharingEnabled: true, latitude, longitude, updatedAt: new Date() }
-      : { sharingEnabled: false };
+
+    let update;
+    if (friendId) {
+      if (!mongoose.Types.ObjectId.isValid(friendId) || String(friendId) === String(req.userId)) {
+        return res.status(400).json({ message: "A valid friend is required." });
+      }
+      const friendship = await Friendship.findOne(
+        acceptedFriendshipQuery(req.userId, friendId)
+      ).select("_id");
+      if (!friendship) {
+        return res.status(403).json({ message: "You can only share your location with an accepted friend." });
+      }
+
+      update = enabled
+        ? {
+            $set: { sharingEnabled: false, latitude, longitude, updatedAt: new Date() },
+            $addToSet: { sharedWith: friendId },
+            $setOnInsert: { user: req.userId },
+          }
+        : {
+            $pull: { sharedWith: friendId },
+            $setOnInsert: { user: req.userId },
+          };
+    } else {
+      update = enabled
+        ? {
+            $set: { sharingEnabled: true, latitude, longitude, updatedAt: new Date() },
+            $setOnInsert: { user: req.userId },
+          }
+        : {
+            $set: { sharingEnabled: false, sharedWith: [] },
+            $setOnInsert: { user: req.userId },
+          };
+    }
+
     const location = await UserLocation.findOneAndUpdate(
       { user: req.userId },
-      { $set: update, $setOnInsert: { user: req.userId } },
+      update,
       { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
     return res.json({
       message: enabled ? "Location sharing is on." : "Location sharing is off.",
       sharingEnabled: location.sharingEnabled,
+      sharedWith: location.sharedWith,
       updatedAt: location.updatedAt,
     });
   } catch (error) {
@@ -83,7 +117,13 @@ exports.updateMyLocation = async (req, res) => {
       return res.status(400).json({ message: "Valid latitude and longitude are required." });
     }
     const location = await UserLocation.findOneAndUpdate(
-      { user: req.userId, sharingEnabled: true },
+      {
+        user: req.userId,
+        $or: [
+          { sharingEnabled: true },
+          { sharedWith: { $exists: true, $type: "array", $ne: [] } },
+        ],
+      },
       { $set: { latitude, longitude, updatedAt: new Date() } },
       { new: true, runValidators: true }
     );
@@ -114,12 +154,17 @@ exports.getFriendsLocations = async (req, res) => {
       $or: [{ requester: req.userId }, { recipient: req.userId }],
     }).select("requester recipient");
 
-    const friendIds = friendships.map((f) =>
-      String(f.requester) === String(req.userId) ? f.recipient : f.requester
+    const friendIds = friendships.map((friendship) =>
+      String(friendship.requester) === String(req.userId) ? friendship.recipient : friendship.requester
     );
     const locations = await UserLocation.find({
-      user: { $in: friendIds }, sharingEnabled: true,
-      latitude: { $ne: null }, longitude: { $ne: null },
+      user: { $in: friendIds },
+      $or: [
+        { sharingEnabled: true },
+        { sharedWith: req.userId },
+      ],
+      latitude: { $ne: null },
+      longitude: { $ne: null },
     }).populate("user", "fullName email")
       .select("user latitude longitude updatedAt").lean();
 

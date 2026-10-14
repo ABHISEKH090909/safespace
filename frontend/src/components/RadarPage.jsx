@@ -264,7 +264,7 @@ export default function RadarPage({ user, friend, initialPosition, onBack }) {
       const response = await fetch(`${API}/share`, {
         method: "PUT",
         headers: headers(),
-        body: JSON.stringify({ enabled: false }),
+        body: JSON.stringify({ enabled: false, friendId: selectedFriendId }),
       });
 
       const data = await response.json();
